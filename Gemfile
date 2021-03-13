@@ -1,228 +1,189 @@
+# frozen_string_literal: true
+
 source 'https://rubygems.org'
 # if there is a super emergency and rubygems is playing up, try
 #source 'http://production.cf.rubygems.org'
 
-module ::Kernel
-  def rails_master?
-    ENV["RAILS_MASTER"] == '1'
-  end
+gem 'bootsnap', require: false, platform: :mri
+
+def rails_master?
+  ENV["RAILS_MASTER"] == '1'
 end
-
-if rails_master?
-  # monkey patching to support dual booting
-  module Bundler::SharedHelpers
-    def default_lockfile=(path)
-      @default_lockfile = path
-    end
-    def default_lockfile
-      @default_lockfile ||= Pathname.new("#{default_gemfile}.lock")
-    end
-  end
-
-  Bundler::SharedHelpers.default_lockfile = Pathname.new("#{Bundler::SharedHelpers.default_gemfile}_master.lock")
-
-  # Bundler::Dsl.evaluate already called with an incorrect lockfile ... fix it
-  class Bundler::Dsl
-    # A bit messy, this can be called multiple times by bundler, avoid blowing the stack
-    unless self.method_defined? :to_definition_unpatched
-      alias_method :to_definition_unpatched, :to_definition
-    end
-    def to_definition(bad_lockfile, unlock)
-      to_definition_unpatched(Bundler::SharedHelpers.default_lockfile, unlock)
-    end
-  end
-
-end
-
-# Monkey patch bundler to support mri_21
-unless Bundler::Dependency::PLATFORM_MAP.include? :mri_21
-   STDERR.puts
-   STDERR.puts "WARNING: --------------------------------------------------------------------------"
-   STDERR.puts "You are running an old version of bundler, please update by running: gem install bundler"
-   STDERR.puts
-   map = Bundler::Dependency::PLATFORM_MAP.dup
-   map[:mri_21] = Gem::Platform::RUBY
-   map.freeze
-   Bundler::Dependency.send(:remove_const, "PLATFORM_MAP")
-   Bundler::Dependency.const_set("PLATFORM_MAP", map)
-
-   Bundler::Dsl.send(:remove_const, "VALID_PLATFORMS")
-   Bundler::Dsl.const_set("VALID_PLATFORMS", map.keys.freeze)
-   class ::Bundler::CurrentRuby
-      def on_21?
-         RUBY_VERSION =~ /^2\.1/
-      end
-      def mri_21?
-        mri? && on_21?
-      end
-   end
-   class ::Bundler::Dependency
-      private
-      def on_21?
-         RUBY_VERSION =~ /^2\.1/
-      end
-      def mri_21?
-        mri? && on_21?
-      end
-   end
-end
-
 
 if rails_master?
   gem 'arel', git: 'https://github.com/rails/arel.git'
   gem 'rails', git: 'https://github.com/rails/rails.git'
-  gem 'rails-observers', git: 'https://github.com/SamSaffron/rails-observers.git'
-  gem 'seed-fu', git: 'https://github.com/SamSaffron/seed-fu.git', branch: 'discourse'
 else
-  gem 'seed-fu', '~> 2.3.3'
-  gem 'rails'
-  gem 'rails-observers'
+  # NOTE: Until rubygems gives us optional dependencies we are stuck with this needing to be explicit
+  # this allows us to include the bits of rails we use without pieces we do not.
+  #
+  # To issue a rails update bump the version number here
+  gem 'actionmailer', '6.0.3.5'
+  gem 'actionpack', '6.0.3.5'
+  gem 'actionview', '6.0.3.5'
+  gem 'activemodel', '6.0.3.5'
+  gem 'activerecord', '6.0.3.5'
+  gem 'activesupport', '6.0.3.5'
+  gem 'railties', '6.0.3.5'
+  gem 'sprockets-rails'
 end
 
-gem 'actionpack-action_caching'
+gem 'json'
 
-# Rails 4.1.6+ will relax the mail gem version requirement to `~> 2.5, >= 2.5.4`.
-# However, mail gem 2.6.x currently does not work with discourse because of the
-# reference to `Mail::RFC2822Parser` in `lib/email.rb`. This ensure discourse
-# would continue to work with Rails 4.1.6+ when it is released.
-gem 'mail', '~> 2.5.4'
+# TODO: At the moment Discourse does not work with Sprockets 4, we would need to correct internals
+# This is a desired upgrade we should get to.
+gem 'sprockets', '3.7.2'
 
-#gem 'redis-rails'
-gem 'hiredis'
-gem 'redis', require:  ["redis", "redis/connection/hiredis"]
+# this will eventually be added to rails,
+# allows us to precompile all our templates in the unicorn master
+gem 'actionview_precompiler', require: false
 
-# We use some ams 0.8.0 features, need to amend code
-# to support 0.9 etc, bench needs to run and ensure no
-# perf regressions
-if rails_master?
-  gem 'active_model_serializers', github: 'rails-api/active_model_serializers', branch: '0-8-stable'
-else
-  gem 'active_model_serializers', '~> 0.8.0'
-end
+gem 'seed-fu'
 
+gem 'mail', git: 'https://github.com/discourse/mail.git', require: false
+gem 'mini_mime'
+gem 'mini_suffix'
+
+gem 'redis'
+
+# This is explicitly used by Sidekiq and is an optional dependency.
+# We tell Sidekiq to use the namespace "sidekiq" which triggers this
+# gem to be used. There is no explicit dependency in sidekiq cause
+# redis namespace support is optional
+# We already namespace stuff in DiscourseRedis, so we should consider
+# just using a single implementation in core vs having 2 namespace implementations
+gem 'redis-namespace'
+
+# NOTE: AM serializer gets a lot slower with recent updates
+# we used an old branch which is the fastest one out there
+# are long term goal here is to fork this gem so we have a
+# better maintained living fork
+gem 'active_model_serializers', '~> 0.8.3'
 
 gem 'onebox'
 
-gem 'ember-rails'
-gem 'ember-source', '1.9.0.beta.4'
-gem 'handlebars-source', '2.0.0'
+gem 'http_accept_language', require: false
+
+# Ember related gems need to be pinned cause they control client side
+# behavior, we will push these versions up when upgrading ember
+gem 'discourse-ember-rails', '0.18.6', require: 'ember-rails'
+gem 'discourse-ember-source', '~> 3.12.2'
+gem 'ember-handlebars-template', '0.8.0'
+gem 'discourse-fonts'
+
 gem 'barber'
 
 gem 'message_bus'
-gem 'rails_multisite', path: 'vendor/gems/rails_multisite'
 
-gem 'redcarpet', require: false
-gem 'eventmachine'
-gem 'fast_xs'
+gem 'rails_multisite'
 
-gem 'fast_xor'
+gem 'fast_xs', platform: :ruby
+
+gem 'xorcist'
+
 gem 'fastimage'
-gem 'fog', '1.22.1', require: false
+
+gem 'aws-sdk-s3', require: false
+gem 'aws-sdk-sns', require: false
+gem 'excon', require: false
 gem 'unf', require: false
 
-gem 'email_reply_parser'
+gem 'email_reply_trimmer'
 
-# note: for image_optim to correctly work you need
-# sudo apt-get install -y advancecomp gifsicle jpegoptim libjpeg-progs optipng pngcrush
-#
-# Sam: held back, getting weird errors in latest
-gem 'image_optim', '0.9.1'
+# Forked until https://github.com/toy/image_optim/pull/162 is merged
+# https://github.com/discourse/image_optim
+gem 'discourse_image_optim', require: 'image_optim'
 gem 'multi_json'
 gem 'mustache'
 gem 'nokogiri'
+gem 'css_parser', require: false
+
 gem 'omniauth'
-gem 'omniauth-openid'
-gem 'openid-redis-store'
 gem 'omniauth-facebook'
 gem 'omniauth-twitter'
-
-# forked while https://github.com/intridea/omniauth-github/pull/41 is being upstreamd
-gem 'omniauth-github-discourse', require: 'omniauth-github'
+gem 'omniauth-github'
 
 gem 'omniauth-oauth2', require: false
+
 gem 'omniauth-google-oauth2'
+
 gem 'oj'
-
-if rails_master?
-  # native casting
-  gem 'pg', '0.18.0.pre20141117110243'
-else
-  # while resolving https://groups.google.com/forum/#!topic/ruby-pg/5_ylGmog1S4
-  gem 'pg', '0.15.1'
-end
-
+gem 'pg'
+gem 'mini_sql'
 gem 'pry-rails', require: false
+gem 'pry-byebug', require: false
+gem 'r2', require: false
 gem 'rake'
 
-
-gem 'rest-client'
+gem 'thor', require: false
+gem 'diffy', require: false
 gem 'rinku'
-gem 'sanitize'
-gem 'sass'
 gem 'sidekiq'
+gem 'mini_scheduler'
 
-# for sidekiq web
-gem 'sinatra', require: nil
+gem 'execjs', require: false
+gem 'mini_racer'
 
-gem 'therubyracer'
-gem 'thin', require: false
 gem 'highline', require: false
+
+gem 'rack'
+
 gem 'rack-protection' # security
+gem 'cbor', require: false
+gem 'cose', require: false
+gem 'addressable'
+gem 'json_schemer'
 
-# Gems used only for assets and not required
-# in production environments by default.
-# allow everywhere for now cause we are allowing asset debugging in prd
+# Gems used only for assets and not required in production environments by default.
+# Allow everywhere for now cause we are allowing asset debugging in production
 group :assets do
-
-  if rails_master?
-    gem 'sass-rails', git: 'https://github.com/rails/sass-rails.git'
-  else
-    # later is breaking our asset compliation extensions
-    gem 'sass-rails', '4.0.2'
-  end
-
   gem 'uglifier'
   gem 'rtlit', require: false # for css rtling
 end
 
 group :test do
-  gem 'fakeweb', '~> 1.3.0', require: false
+  gem 'webmock', require: false
+  gem 'fakeweb', require: false
   gem 'minitest', require: false
+  gem 'simplecov', require: false
+  gem "test-prof"
 end
 
 group :test, :development do
-  # while upgrading to 3
-  gem 'rspec', '2.99.0'
+  gem 'rspec'
   gem 'mock_redis'
-  gem 'listen', '0.7.3', require: false
+  gem 'listen', require: false
   gem 'certified', require: false
-  # later appears to break Fabricate(:topic, category: category)
-  gem 'fabrication', '2.9.8', require: false
-  gem 'qunit-rails'
+  gem 'fabrication', require: false
   gem 'mocha', require: false
+
   gem 'rb-fsevent', require: RUBY_PLATFORM =~ /darwin/i ? 'rb-fsevent' : false
-  gem 'rb-inotify', '~> 0.9', require: RUBY_PLATFORM =~ /linux/i ? 'rb-inotify' : false
-  gem 'rspec-rails', require: false
-  gem 'shoulda', require: false
-  gem 'simplecov', require: false
-  gem 'timecop'
-  gem 'rspec-given'
-  gem 'pry-nav'
-  gem 'spork-rails'
+
+  gem 'rspec-rails'
+
+  gem 'shoulda-matchers', require: false
+  gem 'rspec-html-matchers'
+  gem 'byebug', require: ENV['RM_INFO'].nil?, platform: :mri
+  gem "rubocop-discourse", require: false
+  gem 'parallel_tests'
+
+  gem 'rswag-specs'
 end
 
 group :development do
-  gem 'better_errors'
+  gem 'ruby-prof', require: false, platform: :mri
+  gem 'bullet', require: !!ENV['BULLET']
+  gem 'better_errors', platform: :mri, require: !!ENV['BETTER_ERRORS']
   gem 'binding_of_caller'
-  gem 'librarian', '>= 0.0.25', require: false
+  gem 'yaml-lint'
   gem 'annotate'
-  gem 'foreman', require: false
+  gem 'discourse_dev'
 end
 
 # this is an optional gem, it provides a high performance replacement
 # to String#blank? a method that is called quite frequently in current
 # ActiveRecord, this may change in the future
-gem 'fast_blank' #, github: "SamSaffron/fast_blank"
+gem 'fast_blank', platform: :ruby
 
 # this provides a very efficient lru cache
 gem 'lru_redux'
@@ -230,35 +191,59 @@ gem 'lru_redux'
 gem 'htmlentities', require: false
 
 # IMPORTANT: mini profiler monkey patches, so it better be required last
-#  If you want to amend mini profiler to do the monkey patches in the railstie
+#  If you want to amend mini profiler to do the monkey patches in the railties
 #  we are open to it. by deferring require to the initializer we can configure discourse installs without it
 
-gem 'flamegraph', require: false
-gem 'rack-mini-profiler', require: false
+gem 'rack-mini-profiler', require: ['enable_rails_patches']
 
-gem 'unicorn', require: false
+gem 'unicorn', require: false, platform: :ruby
 gem 'puma', require: false
 gem 'rbtrace', require: false, platform: :mri
+gem 'gc_tracer', require: false, platform: :mri
 
 # required for feed importing and embedding
-#
 gem 'ruby-readability', require: false
 
-gem 'simple-rss', require: false
-gem 'gctools', require: false, platform: :mri_21
-gem 'stackprof', require: false, platform: :mri_21
-gem 'memory_profiler', require: false, platform: :mri_21
+gem 'stackprof', require: false, platform: :mri
+gem 'memory_profiler', require: false, platform: :mri
 
-gem 'rmmseg-cpp', require: false
+gem 'cppjieba_rb', require: false
 
-gem 'stringex', require: false
-
+gem 'lograge', require: false
+gem 'logstash-event', require: false
+gem 'logstash-logger', require: false
 gem 'logster'
 
-# perftools only works on 1.9 atm
-group :profile do
-  # travis refuses to install this, instead of fuffing, just avoid it for now
-  #
-  # if you need to profile, uncomment out this line
-  # gem 'rack-perftools_profiler', require: 'rack/perftools_profiler', platform: :mri_19
+# NOTE: later versions of sassc are causing a segfault, possibly dependent on processer architecture
+# and until resolved should be locked at 2.0.1
+gem 'sassc', '2.0.1', require: false
+gem "sassc-rails"
+
+gem 'rotp', require: false
+
+gem 'rqrcode'
+
+gem 'rubyzip', require: false
+
+gem 'sshkey', require: false
+
+gem 'rchardet', require: false
+gem 'lz4-ruby', require: false, platform: :ruby
+
+if ENV["IMPORT"] == "1"
+  gem 'mysql2'
+  gem 'redcarpet'
+
+  # NOTE: in import mode the version of sqlite can matter a lot, so we stick it to a specific one
+  gem 'sqlite3', '~> 1.3', '>= 1.3.13'
+  gem 'ruby-bbcode-to-md', git: 'https://github.com/nlalonde/ruby-bbcode-to-md'
+  gem 'reverse_markdown'
+  gem 'tiny_tds'
+  gem 'csv'
 end
+
+gem 'webpush', require: false
+gem 'colored2', require: false
+gem 'maxminddb'
+
+gem 'rails_failover', require: false

@@ -1,4 +1,6 @@
-require 'spec_helper'
+# frozen_string_literal: true
+
+require 'rails_helper'
 require 'email/renderer'
 
 describe Email::Renderer do
@@ -20,10 +22,7 @@ describe Email::Renderer do
 
   it "escapes HTML entities from text" do
     renderer = Email::Renderer.new(message)
-    renderer.text.should == "Key & Peele"
+    expect(renderer.text).to eq("Key & Peele")
   end
 
 end
-
-
-

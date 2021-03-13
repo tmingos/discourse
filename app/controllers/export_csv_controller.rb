@@ -1,32 +1,29 @@
+# frozen_string_literal: true
+
 class ExportCsvController < ApplicationController
 
-  skip_before_filter :check_xhr, only: [:show]
+  skip_before_action :preload_json, :check_xhr, only: [:show]
 
   def export_entity
-    params.require(:entity)
-    params.require(:entity_type)
-    if params[:entity_type] == "admin"
-      guardian.ensure_can_export_admin_entity!(current_user)
-    end
+    guardian.ensure_can_export_entity!(export_params[:entity])
 
-    Jobs.enqueue(:export_csv_file, entity: params[:entity], user_id: current_user.id)
-    render json: success_json
-  end
-
-  # download
-  def show
-    params.require(:id)
-    filename = params.fetch(:id)
-    export_id = filename.split('_')[1].split('.')[0]
-    export_initiated_by_user_id = 0
-    export_initiated_by_user_id = CsvExportLog.where(id: export_id)[0].user_id unless CsvExportLog.where(id: export_id).empty?
-    export_csv_path = CsvExportLog.get_download_path(filename)
-
-    if export_csv_path && export_initiated_by_user_id == current_user.id
-      send_file export_csv_path
+    if export_params[:entity] == 'user_archive'
+      Jobs.enqueue(:export_user_archive, user_id: current_user.id, args: export_params[:args])
     else
-      render nothing: true, status: 404
+      Jobs.enqueue(:export_csv_file, entity: export_params[:entity], user_id: current_user.id, args: export_params[:args])
     end
+    StaffActionLogger.new(current_user).log_entity_export(export_params[:entity])
+    render json: success_json
+  rescue Discourse::InvalidAccess
+    render_json_error I18n.t("csv_export.rate_limit_error")
   end
 
+  private
+
+  def export_params
+    @_export_params ||= begin
+      params.require(:entity)
+      params.permit(:entity, args: Report::FILTERS).to_h
+    end
+  end
 end

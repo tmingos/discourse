@@ -1,4 +1,4 @@
-require_dependency 'enum'
+# frozen_string_literal: true
 
 class InvalidTrustLevel < StandardError; end
 
@@ -14,7 +14,7 @@ class TrustLevel
     end
 
     def levels
-      @levels ||= Enum.new(:newuser, :basic, :regular, :leader, :elder, start: 0)
+      @levels ||= Enum.new(:newuser, :basic, :member, :regular, :leader, start: 0)
     end
 
     def all

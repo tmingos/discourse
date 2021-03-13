@@ -1,5 +1,6 @@
-require "spec_helper"
-require_dependency "import/normalize"
+# frozen_string_literal: true
+
+require "rails_helper"
 
 describe Import::Normalize do
   describe "#normalize_code_blocks" do
@@ -14,8 +15,7 @@ describe Import::Normalize do
         <pre><code>this is a &quot;&quot;</code></pre>
 MD
       expected = "      &nbsp;\n      \n```\n        I am a te \"\n        \n```\n\n        test &nbsp;\n        \n```\nthis is a \"\"\n```\n\n"
-      Import::Normalize.normalize_code_blocks(markdown).should == expected
+      expect(Import::Normalize.normalize_code_blocks(markdown)).to eq(expected)
     end
   end
 end
-

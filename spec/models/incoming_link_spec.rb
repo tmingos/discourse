@@ -1,8 +1,12 @@
-require 'spec_helper'
+# frozen_string_literal: true
+
+require 'rails_helper'
 
 describe IncomingLink do
 
-  let(:post) { Fabricate(:post) }
+  fab!(:sharing_user) { Fabricate(:user, name: 'Alice') }
+  fab!(:current_user) { Fabricate(:user, name: 'Bob') }
+  fab!(:post) { Fabricate(:post) }
   let(:topic) { post.topic }
 
   let :incoming_link do
@@ -15,14 +19,14 @@ describe IncomingLink do
       it "increases the incoming link counts" do
         link = incoming_link
 
-        link.domain.should == "twitter.com"
-        link.post_id.should == post.id
+        expect(link.domain).to eq "twitter.com"
+        expect(link.post_id).to eq post.id
 
         post.reload
-        post.incoming_link_count.should == 1
+        expect(post.incoming_link_count).to eq 1
 
         topic.reload
-        topic.incoming_link_count.should == 1
+        expect(topic.incoming_link_count).to eq 1
       end
     end
 
@@ -47,6 +51,12 @@ describe IncomingLink do
       IncomingLink.add(req(opts))
     end
 
+    it "does not explode with bad username" do
+      add(
+        username: "test\0test"
+      )
+    end
+
     it "does not explode with bad referer" do
       add(
         referer: 'file:///Applications/Install/75067ABC-C9D1-47B7-8ACE-76AEDE3911B2/Install/',
@@ -63,30 +73,61 @@ describe IncomingLink do
 
     it "does nothing if referer is empty" do
       add(post_id: 1)
-      IncomingLink.count.should == 0
+      expect(IncomingLink.count).to eq 0
     end
 
     it "does nothing if referer is same as host" do
-      add(post_id: 1, host: 'somesite.com', referer: 'http://somesite.com')
-      IncomingLink.count.should == 0
+      add(post_id: 1, host: 'example.com', referer: 'http://example.com')
+      expect(IncomingLink.count).to eq 0
     end
 
     it "tracks not visits for invalid referers" do
       add(post_id: 1, referer: 'bang bang bang')
-      IncomingLink.count.should == 0
+      expect(IncomingLink.count).to eq 0
     end
 
     it "expects to be called with referer and user id" do
       add(host: "test.com", referer: 'http://some.other.site.com', post_id: 1)
-      IncomingLink.count.should == 1
+      expect(IncomingLink.count).to eq 1
     end
 
     it "is able to look up user_id and log it from the GET params" do
-      user = Fabricate(:user, username: "Bob")
-      add(host: 'test.com', username: "bob", post_id: 1)
+      add(host: 'test.com', username: sharing_user.username, post_id: 1)
 
       first = IncomingLink.first
-      first.user_id.should == user.id
+      expect(first.user_id).to eq sharing_user.id
+    end
+
+    it "logs an incoming and stores IP with no current user" do
+      add(referer: 'https://example.social/@alice/1234',
+          post_id: post.id,
+          username: sharing_user.username,
+          current_user: nil,
+          ip_address: '100.64.1.1')
+      expect(IncomingLink.count).to eq 1
+      il = IncomingLink.last
+      expect(il.ip_address).to eq '100.64.1.1'
+    end
+
+    it "does not log when the sharing user clicks their own link" do
+      add(referer: 'https://example.social/@alice/1234',
+          post_id: post.id,
+          username: sharing_user.username,
+          current_user: sharing_user,
+          ip_address: '100.64.1.2')
+      expect(IncomingLink.count).to eq 0
+    end
+
+    it "does not store ip address when a logged-in user clicks" do
+      add(referer: 'https://example.social/@alice/1234',
+          post_id: post.id,
+          username: sharing_user.username,
+          current_user: current_user,
+          ip_address: '100.64.1.3')
+      expect(IncomingLink.count).to eq 1
+      il = IncomingLink.last
+      expect(il.ip_address).to eq nil
+      expect(il.current_user_id).to eq current_user.id
     end
   end
 

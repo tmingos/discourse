@@ -1,12 +1,12 @@
-class UserWordpressSerializer < BasicUserSerializer
+# frozen_string_literal: true
 
-  include UrlHelper
+class UserWordpressSerializer < BasicUserSerializer
 
   def avatar_template
     if Hash === object
-      absolute User.avatar_template(user[:username], user[:uploaded_avatar_id])
+      UrlHelper.absolute User.avatar_template(user[:username], user[:uploaded_avatar_id])
     else
-      absolute object.avatar_template
+      UrlHelper.absolute object.avatar_template
     end
   end
 

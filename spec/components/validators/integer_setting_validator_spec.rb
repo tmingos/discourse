@@ -1,16 +1,18 @@
-require 'spec_helper'
+# frozen_string_literal: true
+
+require 'rails_helper'
 
 describe IntegerSettingValidator do
   describe '#valid_value?' do
 
     shared_examples "for all IntegerSettingValidator opts" do
       it "returns false for blank values" do
-        validator.valid_value?('').should == false
-        validator.valid_value?(nil).should == false
+        expect(validator.valid_value?('')).to eq(false)
+        expect(validator.valid_value?(nil)).to eq(false)
       end
 
       it "returns false if value is not a valid integer" do
-        validator.valid_value?('two').should == false
+        expect(validator.valid_value?('two')).to eq(false)
       end
     end
 
@@ -20,10 +22,22 @@ describe IntegerSettingValidator do
       include_examples "for all IntegerSettingValidator opts"
 
       it "returns true if value is a valid integer" do
-        validator.valid_value?(1).should == true
-        validator.valid_value?(-1).should == true
-        validator.valid_value?('1').should == true
-        validator.valid_value?('-1').should == true
+        expect(validator.valid_value?(1)).to eq(true)
+        expect(validator.valid_value?('1')).to eq(true)
+      end
+
+      it "defaults min to 0" do
+        expect(validator.valid_value?(-1)).to eq(false)
+        expect(validator.valid_value?('-1')).to eq(false)
+        expect(validator.valid_value?(0)).to eq(true)
+        expect(validator.valid_value?('0')).to eq(true)
+      end
+
+      it "defaults max to 2_000_000_000" do
+        expect(validator.valid_value?(2_000_000_001)).to eq(false)
+        expect(validator.valid_value?('2000000001')).to eq(false)
+        expect(validator.valid_value?(2_000_000_000)).to eq(true)
+        expect(validator.valid_value?('2000000000')).to eq(true)
       end
     end
 
@@ -33,18 +47,18 @@ describe IntegerSettingValidator do
       include_examples "for all IntegerSettingValidator opts"
 
       it "returns true if value is equal to min" do
-        validator.valid_value?(2).should == true
-        validator.valid_value?('2').should == true
+        expect(validator.valid_value?(2)).to eq(true)
+        expect(validator.valid_value?('2')).to eq(true)
       end
 
       it "returns true if value is greater than min" do
-        validator.valid_value?(3).should == true
-        validator.valid_value?('3').should == true
+        expect(validator.valid_value?(3)).to eq(true)
+        expect(validator.valid_value?('3')).to eq(true)
       end
 
       it "returns false if value is less than min" do
-        validator.valid_value?(1).should == false
-        validator.valid_value?('1').should == false
+        expect(validator.valid_value?(1)).to eq(false)
+        expect(validator.valid_value?('1')).to eq(false)
       end
     end
 
@@ -54,18 +68,18 @@ describe IntegerSettingValidator do
       include_examples "for all IntegerSettingValidator opts"
 
       it "returns true if value is equal to max" do
-        validator.valid_value?(3).should == true
-        validator.valid_value?('3').should == true
+        expect(validator.valid_value?(3)).to eq(true)
+        expect(validator.valid_value?('3')).to eq(true)
       end
 
       it "returns true if value is less than max" do
-        validator.valid_value?(2).should == true
-        validator.valid_value?('2').should == true
+        expect(validator.valid_value?(2)).to eq(true)
+        expect(validator.valid_value?('2')).to eq(true)
       end
 
       it "returns false if value is greater than min" do
-        validator.valid_value?(4).should == false
-        validator.valid_value?('4').should == false
+        expect(validator.valid_value?(4)).to eq(false)
+        expect(validator.valid_value?('4')).to eq(false)
       end
     end
 
@@ -75,14 +89,23 @@ describe IntegerSettingValidator do
       include_examples "for all IntegerSettingValidator opts"
 
       it "returns true if value is in range" do
-        validator.valid_value?(-1).should == true
-        validator.valid_value?(0).should == true
-        validator.valid_value?(3).should == true
+        expect(validator.valid_value?(-1)).to eq(true)
+        expect(validator.valid_value?(0)).to eq(true)
+        expect(validator.valid_value?(3)).to eq(true)
       end
 
       it "returns false if value is out of range" do
-        validator.valid_value?(4).should == false
-        validator.valid_value?(-2).should == false
+        expect(validator.valid_value?(4)).to eq(false)
+        expect(validator.valid_value?(-2)).to eq(false)
+      end
+    end
+
+    context "when setting is hidden" do
+      subject(:validator) { described_class.new(hidden: true) }
+
+      it "does not impose default validations" do
+        expect(validator.valid_value?(-1)).to eq(true)
+        expect(validator.valid_value?(20001)).to eq(true)
       end
     end
   end

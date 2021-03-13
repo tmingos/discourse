@@ -1,98 +1,88 @@
+# frozen_string_literal: true
+
 require "s3_helper"
-require "spec_helper"
+require "rails_helper"
 
 describe "S3Helper" do
+  let(:client) { Aws::S3::Client.new(stub_responses: true) }
 
-  before(:each) do
-    SiteSetting.stubs(:s3_access_key_id).returns("s3_access_key_id")
-    SiteSetting.stubs(:s3_secret_access_key).returns("s3_secret_access_key")
-    Fog.mock!
-    Fog::Mock.reset
-    Fog::Mock.delay = 0
+  before do
+    setup_s3
+
+    @lifecycle = <<~XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+        <Rule>
+            <ID>old_rule</ID>
+            <Prefix>projectdocs/</Prefix>
+            <Status>Enabled</Status>
+            <Expiration>
+               <Days>3650</Days>
+            </Expiration>
+        </Rule>
+        <Rule>
+            <ID>purge-tombstone</ID>
+            <Prefix>test/</Prefix>
+            <Status>Enabled</Status>
+            <Expiration>
+               <Days>3650</Days>
+            </Expiration>
+        </Rule>
+      </LifecycleConfiguration>
+    XML
   end
 
-  after(:each) do
-    Fog.unmock!
+  it "can correctly set the purge policy" do
+    SiteSetting.s3_configure_tombstone_policy = true
+
+    stub_request(:get, "http://169.254.169.254/latest/meta-data/iam/security-credentials/").
+      to_return(status: 404, body: "", headers: {})
+
+    stub_request(:get, "https://bob.s3.#{SiteSetting.s3_region}.amazonaws.com/?lifecycle").
+      to_return(status: 200, body: @lifecycle, headers: {})
+
+    stub_request(:put, "https://bob.s3.#{SiteSetting.s3_region}.amazonaws.com/?lifecycle").
+      with do |req|
+
+      hash = Hash.from_xml(req.body.to_s)
+      rules = hash["LifecycleConfiguration"]["Rule"]
+
+      expect(rules.length).to eq(2)
+      expect(rules[1]["Expiration"]["Days"]).to eq("100")
+      # fixes the bad filter
+      expect(rules[0]["Filter"]["Prefix"]).to eq("projectdocs/")
+    end.to_return(status: 200, body: "", headers: {})
+
+    helper = S3Helper.new('bob', 'tomb')
+    helper.update_tombstone_lifecycle(100)
   end
 
+  it "can skip policy update when s3_configure_tombstone_policy is false" do
+    SiteSetting.s3_configure_tombstone_policy = false
 
-  let(:s3_bucket) { "s3_bucket_name" }
-  let(:tombstone_prefix) { nil }
-  let(:fog) { stub }
-  let(:s3) { S3Helper.new(s3_bucket, tombstone_prefix, fog) }
-
-  let(:filename) { "logo.png" }
-  let(:file) { file_from_fixtures(filename) }
-
-  it "ensures the bucket name isn't blank" do
-    -> { S3Helper.new("") }.should raise_error(Discourse::InvalidParameters)
+    helper = S3Helper.new('bob', 'tomb')
+    helper.update_tombstone_lifecycle(100)
   end
 
-  describe ".upload" do
-
-    let(:fog) { nil }
-
-    it "works" do
-      result = s3.upload(file, filename)
-      expect(result).to be_a Fog::Storage::AWS::File
-    end
-
-  end
-
-  describe ".remove" do
-
-    context "without tombstone prefix" do
-
-      it "only deletes the object even when asked to copy it to the tombstone" do
-        fog.expects(:copy_object).never
-        fog.expects(:delete_object).with(s3_bucket, filename)
-        s3.remove(filename, true)
+  describe '#list' do
+    it 'creates the prefix correctly' do
+      {
+        'some/bucket' => 'bucket/testing',
+        'some' => 'testing'
+      }.each do |bucket_name, prefix|
+        s3_helper = S3Helper.new(bucket_name, "", client: client)
+        Aws::S3::Bucket.any_instance.expects(:objects).with(prefix: prefix)
+        s3_helper.list('testing')
       end
-
     end
-
-    context "with tombstone prefix" do
-
-      let(:tombstone_prefix) { "tombstone/" }
-
-      it "only deletes the object by default" do
-        fog.expects(:copy_object).never
-        fog.expects(:delete_object).with(s3_bucket, filename)
-        s3.remove(filename)
-      end
-
-      it "copies the object to the tombstone and deletes it when asked for" do
-        fog.expects(:copy_object)
-        fog.expects(:delete_object).with(s3_bucket, filename)
-        s3.remove(filename, true)
-      end
-
-    end
-
   end
 
-  describe ".update_tombstone_lifecycle" do
+  it "should prefix bucket folder path only if not exists" do
+    s3_helper = S3Helper.new('bucket/folder_path', "", client: client)
 
-    context "without tombstone prefix" do
+    object1 = s3_helper.object("original/1X/def.xyz")
+    object2 = s3_helper.object("folder_path/original/1X/def.xyz")
 
-      it "doesn't call put_bucket_lifecycle" do
-        fog.expects(:put_bucket_lifecycle).never
-        s3.update_tombstone_lifecycle(3.days)
-      end
-
-    end
-
-    context "with tombstone prefix" do
-
-      let(:tombstone_prefix) { "tombstone/" }
-
-      it "calls put_bucket_lifecycle" do
-        fog.expects(:put_bucket_lifecycle)
-        s3.update_tombstone_lifecycle(3.days)
-      end
-
-    end
-
+    expect(object1.key).to eq(object2.key)
   end
-
 end

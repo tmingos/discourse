@@ -1,23 +1,19 @@
-class ForumsController < ApplicationController
+# frozen_string_literal: true
 
-  skip_before_filter :check_xhr
-  skip_before_filter :authorize_mini_profiler, only: [:status]
-  skip_before_filter :redirect_to_login_if_required, only: [:status]
+require "read_only_header"
+
+class ForumsController < ActionController::Base
+  include ReadOnlyHeader
+
+  before_action :check_readonly_mode
+  after_action  :add_readonly_header
 
   def status
-    if $shutdown
-      render text: 'shutting down', status: 500
+    if $shutdown # rubocop:disable Style/GlobalVars
+      render plain: "shutting down", status: (params[:shutdown_ok] ? 200 : 500)
     else
-      render text: 'ok'
+      render plain: "ok"
     end
-  end
-
-  def error
-    raise "WAT - #{Time.now}"
-  end
-
-  def home_redirect
-    redirect_to '/'
   end
 
 end

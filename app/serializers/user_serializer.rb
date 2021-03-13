@@ -1,123 +1,157 @@
-class UserSerializer < BasicUserSerializer
+# frozen_string_literal: true
 
-  def self.staff_attributes(*attrs)
-    attributes(*attrs)
-    attrs.each do |attr|
-      define_method "include_#{attr}?" do
-        scope.is_staff?
-      end
-    end
-  end
+class UserSerializer < UserCardSerializer
 
-  def self.private_attributes(*attrs)
-    attributes(*attrs)
-    attrs.each do |attr|
-      define_method "include_#{attr}?" do
-        can_edit
-      end
-    end
-  end
-
-  # attributes that are hidden for TL0 users when seen by anonymous
-  def self.untrusted_attributes(*attrs)
-    attrs.each do |attr|
-      method_name = "include_#{attr}?"
-      define_method(method_name) do
-        return false if scope.restrict_user_fields?(object)
-        send(attr).present?
-      end
-    end
-  end
-
-  attributes :name,
-             :email,
-             :last_posted_at,
-             :last_seen_at,
-             :bio_raw,
+  attributes :bio_raw,
              :bio_cooked,
-             :created_at,
-             :website,
-             :profile_background,
-             :card_background,
-             :location,
              :can_edit,
              :can_edit_username,
              :can_edit_email,
              :can_edit_name,
-             :stats,
-             :can_send_private_messages,
-             :can_send_private_message_to_user,
-             :bio_excerpt,
-             :trust_level,
-             :moderator,
-             :admin,
-             :title,
-             :suspend_reason,
-             :suspended_till,
              :uploaded_avatar_id,
-             :badge_count,
-             :notification_count,
              :has_title_badges,
-             :edit_history_public,
-             :custom_fields,
-             :user_fields
+             :pending_count,
+             :profile_view_count,
+             :second_factor_enabled,
+             :second_factor_backup_enabled,
+             :second_factor_remaining_backup_codes,
+             :associated_accounts,
+             :profile_background_upload_url,
+             :can_upload_profile_header,
+             :can_upload_user_card_background
 
   has_one :invited_by, embed: :object, serializer: BasicUserSerializer
-  has_many :custom_groups, embed: :object, serializer: BasicGroupSerializer
-  has_many :featured_user_badges, embed: :ids, serializer: UserBadgeSerializer, root: :user_badges
-  has_one  :card_badge, embed: :object, serializer: BadgeSerializer
+  has_many :groups, embed: :object, serializer: BasicGroupSerializer
+  has_many :group_users, embed: :object, serializer: BasicGroupUserSerializer
+  has_one :user_option, embed: :object, serializer: UserOptionSerializer
+
+  def include_user_option?
+    can_edit
+  end
 
   staff_attributes :post_count,
-                   :number_of_deleted_posts,
-                   :number_of_flagged_posts,
-                   :number_of_flags_given,
-                   :number_of_suspensions,
-                   :number_of_warnings,
                    :can_be_deleted,
                    :can_delete_all_posts
 
   private_attributes :locale,
-                     :email_digests,
-                     :email_private_messages,
-                     :email_direct,
-                     :email_always,
-                     :digest_after_days,
-                     :mailing_list_mode,
-                     :auto_track_topics_after_msecs,
-                     :new_topic_duration_minutes,
-                     :external_links_in_new_tab,
-                     :dynamic_favicon,
-                     :enable_quoting,
                      :muted_category_ids,
+                     :regular_category_ids,
+                     :watched_tags,
+                     :watching_first_post_tags,
+                     :tracked_tags,
+                     :muted_tags,
                      :tracked_category_ids,
                      :watched_category_ids,
-                     :private_messages_stats,
-                     :notification_count,
-                     :disable_jump_reply,
+                     :watched_first_post_category_ids,
+                     :system_avatar_upload_id,
+                     :system_avatar_template,
                      :gravatar_avatar_upload_id,
+                     :gravatar_avatar_template,
                      :custom_avatar_upload_id,
+                     :custom_avatar_template,
                      :has_title_badges,
-                     :card_image_badge,
-                     :card_image_badge_id
+                     :muted_usernames,
+                     :ignored_usernames,
+                     :allowed_pm_usernames,
+                     :mailing_list_posts_per_day,
+                     :can_change_bio,
+                     :can_change_location,
+                     :can_change_website,
+                     :user_api_keys,
+                     :user_auth_tokens,
+                     :user_notification_schedule
 
   untrusted_attributes :bio_raw,
                        :bio_cooked,
-                       :bio_excerpt,
-                       :location,
-                       :website,
-                       :profile_background,
-                       :card_background
+                       :profile_background_upload_url,
 
   ###
   ### ATTRIBUTES
   ###
-
-  def include_email?
-    object.id && object.id == scope.user.try(:id)
+  #
+  def user_notification_schedule
+    object.user_notification_schedule || UserNotificationSchedule::DEFAULT
   end
 
-  def card_badge
-    object.user_profile.card_image_badge
+  def mailing_list_posts_per_day
+    val = Post.estimate_posts_per_day
+    [val, SiteSetting.max_emails_per_day_per_user].min
+  end
+
+  def groups
+    object.groups.order(:id)
+      .visible_groups(scope.user).members_visible_groups(scope.user)
+  end
+
+  def group_users
+    object.group_users.order(:group_id)
+  end
+
+  def include_group_users?
+    (object.id && object.id == scope.user.try(:id)) || scope.is_admin?
+  end
+
+  def include_associated_accounts?
+    (object.id && object.id == scope.user.try(:id))
+  end
+
+  def include_second_factor_enabled?
+    (object&.id == scope.user&.id) || scope.is_admin?
+  end
+
+  def second_factor_enabled
+    object.totp_enabled? || object.security_keys_enabled?
+  end
+
+  def include_second_factor_backup_enabled?
+    object&.id == scope.user&.id
+  end
+
+  def second_factor_backup_enabled
+    object.backup_codes_enabled?
+  end
+
+  def include_second_factor_remaining_backup_codes?
+    (object&.id == scope.user&.id) && object.backup_codes_enabled?
+  end
+
+  def second_factor_remaining_backup_codes
+    object.remaining_backup_codes
+  end
+
+  def can_change_bio
+    !(SiteSetting.enable_discourse_connect && SiteSetting.discourse_connect_overrides_bio)
+  end
+
+  def can_change_location
+    !(SiteSetting.enable_discourse_connect && SiteSetting.discourse_connect_overrides_location)
+  end
+
+  def can_change_website
+    !(SiteSetting.enable_discourse_connect && SiteSetting.discourse_connect_overrides_website)
+  end
+
+  def user_api_keys
+    keys = object.user_api_keys.where(revoked_at: nil).map do |k|
+      {
+        id: k.id,
+        application_name: k.application_name,
+        scopes: k.scopes.map { |s| I18n.t("user_api_key.scopes.#{s.name}") },
+        created_at: k.created_at,
+        last_used_at: k.last_used_at,
+      }
+    end
+
+    keys.sort! { |a, b| a[:last_used_at].to_time <=> b[:last_used_at].to_time }
+    keys.length > 0 ? keys : nil
+  end
+
+  def user_auth_tokens
+    ActiveModel::ArraySerializer.new(
+      object.user_auth_tokens,
+      each_serializer: UserAuthTokenSerializer,
+      scope: scope
+    )
   end
 
   def bio_raw
@@ -126,38 +160,6 @@ class UserSerializer < BasicUserSerializer
 
   def bio_cooked
     object.user_profile.bio_processed
-  end
-
-  def website
-    object.user_profile.website
-  end
-
-  def card_image_badge_id
-    object.user_profile.card_image_badge.try(:id)
-  end
-
-  def include_card_image_badge_id?
-    card_image_badge_id.present?
-  end
-
-  def card_image_badge
-    object.user_profile.card_image_badge.try(:image)
-  end
-
-  def include_card_image_badge?
-    card_image_badge.present?
-  end
-
-  def profile_background
-    object.user_profile.profile_background
-  end
-
-  def card_background
-    object.user_profile.card_background
-  end
-
-  def location
-    object.user_profile.location
   end
 
   def can_edit
@@ -176,39 +178,12 @@ class UserSerializer < BasicUserSerializer
     scope.can_edit_name?(object)
   end
 
-  def stats
-    UserAction.stats(object.id, scope)
+  def can_upload_profile_header
+    scope.can_upload_profile_header?(object)
   end
 
-  # Needed because 'send_private_message_to_user' will always return false
-  # when the current user is being serialized
-  def can_send_private_messages
-    scope.can_send_private_message?(Discourse.system_user)
-  end
-
-  def can_send_private_message_to_user
-    scope.can_send_private_message?(object)
-  end
-
-  def bio_excerpt
-    # If they have a bio return it
-    excerpt = object.user_profile.bio_excerpt
-    return excerpt if excerpt.present?
-
-    # Without a bio, determine what message to show
-    if scope.user && scope.user.id == object.id
-      I18n.t('user_profile.no_info_me', username_lower: object.username_lower)
-    else
-      I18n.t('user_profile.no_info_other', name: object.name)
-    end
-  end
-
-  def include_suspend_reason?
-    object.suspended?
-  end
-
-  def include_suspended_till?
-    object.suspended?
+  def can_upload_user_card_background
+    scope.can_upload_user_card_background?(object)
   end
 
   ###
@@ -217,38 +192,6 @@ class UserSerializer < BasicUserSerializer
 
   def post_count
     object.user_stat.try(:post_count)
-  end
-
-  def number_of_deleted_posts
-    Post.with_deleted
-        .where(user_id: object.id)
-        .where(user_deleted: false)
-        .where.not(deleted_by_id: object.id)
-        .where.not(deleted_at: nil)
-        .count
-  end
-
-  def number_of_flagged_posts
-    Post.with_deleted
-        .where(user_id: object.id)
-        .where(id: PostAction.where(post_action_type_id: PostActionType.notify_flag_type_ids)
-                             .where(disagreed_at: nil)
-                             .select(:post_id))
-        .count
-  end
-
-  def number_of_flags_given
-    PostAction.where(user_id: object.id)
-              .where(post_action_type_id: PostActionType.notify_flag_type_ids)
-              .count
-  end
-
-  def number_of_warnings
-    object.warnings.count
-  end
-
-  def number_of_suspensions
-    UserHistory.for(object, :suspend_user).count
   end
 
   def can_be_deleted
@@ -262,17 +205,28 @@ class UserSerializer < BasicUserSerializer
   ###
   ### PRIVATE ATTRIBUTES
   ###
-
-  def auto_track_topics_after_msecs
-    object.auto_track_topics_after_msecs || SiteSetting.auto_track_topics_after
+  def muted_tags
+    TagUser.lookup(object, :muted).joins(:tag).pluck('tags.name')
   end
 
-  def new_topic_duration_minutes
-    object.new_topic_duration_minutes || SiteSetting.new_topic_duration_minutes
+  def tracked_tags
+    TagUser.lookup(object, :tracking).joins(:tag).pluck('tags.name')
+  end
+
+  def watching_first_post_tags
+    TagUser.lookup(object, :watching_first_post).joins(:tag).pluck('tags.name')
+  end
+
+  def watched_tags
+    TagUser.lookup(object, :watching).joins(:tag).pluck('tags.name')
   end
 
   def muted_category_ids
     CategoryUser.lookup(object, :muted).pluck(:category_id)
+  end
+
+  def regular_category_ids
+    CategoryUser.lookup(object, :regular).pluck(:category_id)
   end
 
   def tracked_category_ids
@@ -283,49 +237,88 @@ class UserSerializer < BasicUserSerializer
     CategoryUser.lookup(object, :watching).pluck(:category_id)
   end
 
-  def private_messages_stats
-    UserAction.private_messages_stats(object.id, scope)
+  def watched_first_post_category_ids
+    CategoryUser.lookup(object, :watching_first_post).pluck(:category_id)
+  end
+
+  def muted_usernames
+    MutedUser.where(user_id: object.id).joins(:muted_user).pluck(:username)
+  end
+
+  def ignored_usernames
+    IgnoredUser.where(user_id: object.id).joins(:ignored_user).pluck(:username)
+  end
+
+  def allowed_pm_usernames
+    AllowedPmUser.where(user_id: object.id).joins(:allowed_pm_user).pluck(:username)
+  end
+
+  def system_avatar_upload_id
+    # should be left blank
+  end
+
+  def system_avatar_template
+    User.system_avatar_template(object.username)
+  end
+
+  def include_gravatar_avatar_upload_id?
+    object.user_avatar&.gravatar_upload_id
   end
 
   def gravatar_avatar_upload_id
-    object.user_avatar.try(:gravatar_upload_id)
+    object.user_avatar.gravatar_upload_id
+  end
+
+  def include_gravatar_avatar_template?
+    include_gravatar_avatar_upload_id?
+  end
+
+  def gravatar_avatar_template
+    User.avatar_template(object.username, object.user_avatar.gravatar_upload_id)
+  end
+
+  def include_custom_avatar_upload_id?
+    object.user_avatar&.custom_upload_id
   end
 
   def custom_avatar_upload_id
-    object.user_avatar.try(:custom_upload_id)
+    object.user_avatar.custom_upload_id
+  end
+
+  def include_custom_avatar_template?
+    include_custom_avatar_upload_id?
+  end
+
+  def custom_avatar_template
+    User.avatar_template(object.username, object.user_avatar.custom_upload_id)
   end
 
   def has_title_badges
-    object.badges.where(allow_title: true).count > 0
+    object.badges.where(allow_title: true).exists?
   end
 
-  def notification_count
-    Notification.where(user_id: object.id).count
+  def pending_count
+    0
   end
 
-  def include_edit_history_public?
-    can_edit && !SiteSetting.edit_history_visible_to_public
+  def profile_view_count
+    object.user_profile.views
   end
 
-  def user_fields
-    object.user_fields
+  def profile_background_upload_url
+    object.profile_background_upload&.url
   end
 
-  def include_user_fields?
-    user_fields.present?
-  end
+  private
 
-  def custom_fields
-    fields = nil
+  def custom_field_keys
+    fields = super
 
-    if SiteSetting.public_user_custom_fields.present?
-      fields = SiteSetting.public_user_custom_fields.split('|')
+    if scope.can_edit?(object)
+      fields += DiscoursePluginRegistry.serialized_current_user_fields.to_a
     end
 
-    if fields.present?
-      User.custom_fields_for_ids([object.id], fields)[object.id]
-    else
-      {}
-    end
+    fields
   end
+
 end
